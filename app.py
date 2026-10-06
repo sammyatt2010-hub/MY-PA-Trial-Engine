@@ -5629,9 +5629,14 @@ with col_left:
             statuses = (ZOHO.lead_statuses(st.session_state["zoho_fields"]) or ["Not Contacted"]) + [NO_STATUS]
             remembered = [x for x in _qp_list("status") if x in statuses]
             default_status = remembered or [s for s in statuses if not any(w in s.lower() for w in SKIP_STATUS_WORDS)]
+            # Keyed widget, set up once: clearing it and picking one status keeps just that status
+            if "f_status" not in st.session_state:
+                st.session_state["f_status"] = default_status
+            else:
+                st.session_state["f_status"] = [x for x in st.session_state["f_status"] if x in statuses]
             s_col1, s_col2 = columns([2.2, 1])
             with s_col1:
-                chosen_statuses = st.multiselect("Lead Status", statuses, default=default_status,
+                chosen_statuses = st.multiselect("Lead Status", statuses, key="f_status",
                                                  help="Every lead with an email in these statuses. Junk, lost and"
                                                       " not-qualified statuses are left out unless you add them.")
             with s_col2:
