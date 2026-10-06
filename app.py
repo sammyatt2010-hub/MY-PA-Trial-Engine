@@ -3713,6 +3713,13 @@ ZOHO_FIELD_API = {"Website": "Website", "Phone": "Phone", "Email": "Email",
                   "First Name": "First_Name", "Last Name": "Last_Name", "Title": "Designation"}
 
 
+_ZOHO_STEP_NAMES = {
+    "/settings/fields": "reading Lead fields", "/org": "reading the organisation", "/coql": "loading leads",
+    "from_addresses": "listing From addresses", "/files": "uploading the PDF", "send_mail": "sending the email",
+    "add_tags": "adding the tag", "/Notes": "adding the note", "/crm/v8/Leads": "updating the lead",
+}
+
+
 class ZohoError(RuntimeError):
     pass
 
@@ -3808,7 +3815,9 @@ class ZohoCRM:
                 code = code or str(row.get("code", ""))
                 msg = body.get("message") or row.get("message") or code or f"HTTP {resp.status_code}"
                 if code == "OAUTH_SCOPE_MISMATCH":
-                    msg = "The Zoho token is missing a permission. Regenerate it with the scopes listed in the setup notes."
+                    step = _ZOHO_STEP_NAMES.get(next((k for k in _ZOHO_STEP_NAMES if k in path), ""), path)
+                    msg = (f"The Zoho token is missing a permission ({step}). Regenerate it with the scopes listed in"
+                           f" the setup notes. Zoho said: {body.get('message') or row.get('message') or code}")
                 raise ZohoError(f"Zoho CRM error: {msg}")
             return body
         raise ZohoError("Zoho CRM rejected the sign-in.")
@@ -5613,7 +5622,12 @@ with col_left:
             )
         else:
             meta_error = load_zoho_meta()
-            if meta_error and "invalid_code" in meta_error:
+            if meta_error and "permission" in meta_error.lower():
+                st.error("The Zoho key in Secrets doesn't have all the permissions this app needs (it's probably"
+                         " another app's key). Get this app its own key below, then replace ZOHO_REFRESH_TOKEN in"
+                         " Secrets and reboot.")
+                render_zoho_setup()
+            elif meta_error and "invalid_code" in meta_error:
                 st.error("The ZOHO_REFRESH_TOKEN in Secrets isn't a working key (it may be the short-lived code"
                          " rather than the permanent key). Get a new one below, then replace that line in Secrets.")
                 render_zoho_setup()
