@@ -28,7 +28,7 @@ import streamlit.components.v1 as components
 # ==========================================
 
 APP_NAME = "MY PA Trial Engine"
-APP_TAGLINE = "Free 7-day Connect trials from Zoho"
+APP_TAGLINE = "Free 1-week Connect trials from Zoho"
 
 APP_CSS = """
 <style>
@@ -384,7 +384,7 @@ def hero_html(active_step: int) -> str:
         '<div class="pe-hero"><div>'
         '<div class="pe-eyebrow"><span class="dot"></span>MY PA Connect · Zoho CRM · contact@mypaglobal.com</div>'
         '<div class="pe-title">MY PA <span>Trial Engine</span></div>'
-        '<div class="pe-sub">Offer Zoho leads a free 7-day trial of MY PA Connect: pick today\'s batch, check the'
+        '<div class="pe-sub">Offer Zoho leads a free 1-week trial of MY PA Connect: pick today\'s batch, check the'
         ' contact, then send a personalised email and one-page overview from MY PA.</div>'
         f'</div><div class="pe-stepper">{stepper}</div></div>'
     )
@@ -2633,7 +2633,7 @@ TRIAL_URL_DEFAULT = "https://mypaglobal.com/connect/"
 STATS_LINE = ("92% of callers don't try again if their call goes unanswered, and 80% won't leave a message."
               " UK businesses lose an estimated £3.5bn a year to missed calls.")
 SWITCHOVER_LINE = STATS_LINE  # The old 'switch-off' toggle now adds the missed-call stats
-TRIAL_LINE = ("Try it free for 7 days, with no cost and no commitment. Just reply \"YES\" and we'll set your free week up,"
+TRIAL_LINE = ("Take a free 1-week trial, with no cost and no commitment. Just reply \"YES\" and we'll set your free week up,"
               " or book it at mypaglobal.com/connect.")
 EVERYTHING_WE_DO = [
     "Dedicated UK-based receptionists",
@@ -2927,14 +2927,14 @@ def _email_branded_html(body: str, subject: str = "") -> str:
                                                       ("&pound;3.5bn", "lost by UK businesses each year to missed calls")]))
                 + '</tr></table></td></tr>')
             continue
-        if low.startswith("try it free"):
+        if low.startswith(("try it free", "take a free 1-week trial", "free 1-week trial")):
             href = _secret_value("TRIAL_URL") or TRIAL_URL_DEFAULT
-            reply = (f"mailto:{sender.get('email', '')}?subject={quote('YES please: free 7-day trial')}"
-                     f"&body={quote('Yes please, I would like to try MY PA Connect free for 7 days.')}")
+            reply = (f"mailto:{sender.get('email', '')}?subject={quote('YES please: free 1-week trial')}"
+                     f"&body={quote('Yes please, I would like a free 1-week trial of MY PA Connect.')}")
             rows.append(
                 f'<tr><td align="center" style="padding:8px 36px 4px 36px">'
                 f'<div style="{font};font-size:16px;font-weight:800;color:{purple};margin-bottom:12px">'
-                f'Try MY PA Connect free for 7 days</div>'
+                f'Free 1-week trial of MY PA Connect</div>'
                 f'<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
                 f'<td align="center" bgcolor="{teal}" style="border-radius:8px">'
                 f'<a href="{e(reply)}" style="display:inline-block;padding:13px 26px;{font};font-size:15px;font-weight:700;'
@@ -3241,7 +3241,7 @@ def create_sector_overview_pdf(lead: Optional[ScrapedLead], vertical_key: str) -
         ("Proudly based in the UK", "Real people in Shropshire, not an overseas call centre."),
         ("Trained on your business", "Full onboarding, so we give informed answers, not just messages."),
         ("Flexible and scalable", "Overflow, out of hours or every call: cover that fits you."),
-        ("Try it free for 7 days", "Experience the service before you commit to anything."),
+        ("Free 1-week trial", "Experience the service before you commit to anything."),
     ]
     yy = y0 + 8
     for title, desc in why:
@@ -3263,7 +3263,7 @@ def create_sector_overview_pdf(lead: Optional[ScrapedLead], vertical_key: str) -
     steps = [
         ("Reply YES", "Or book online at mypaglobal.com/connect."),
         ("Quick onboarding", "We learn your business, services and how you like calls handled."),
-        ("Your free 7 days", "We answer your calls for a week, with no cost and no commitment."),
+        ("Your free 1-week trial", "We answer your calls for a week, with no cost and no commitment."),
     ]
     for i, (title, desc) in enumerate(steps):
         x = L + i * (cw3 + gap)
@@ -4670,12 +4670,12 @@ def push_to_zoho(ids: List[str], sender: Optional[Dict[str, Any]], new_status: O
         if prepare_only:
             note = (f"MY PA free-trial email prepared by {who} on {stamp} (not sent yet).\nTo: {to or 'no address'}\n"
                     f"Subject: {item['subject']}\n\n{item['body']}")
-            title = "MY PA: free 7-day trial email ready to send"
+            title = "MY PA: free 1-week trial email ready to send"
         else:
-            note = (f"Free 7-day MY PA Connect trial offered by email on {stamp}.\nFrom: {sender.get('email') if sender else ''}"
+            note = (f"Free 1-week MY PA Connect trial offered by email on {stamp}.\nFrom: {sender.get('email') if sender else ''}"
                     f"\nTo: {to}\nSubject: {item['subject']}\nPitch: {item['vertical']}"
                     + (" (overview PDF attached)" if st.session_state["opt_attach"] else ""))
-            title = "MY PA: free 7-day trial offered"
+            title = "MY PA: free 1-week trial offered"
         if found:
             note += "\nFilled in: " + ", ".join(f"{k} ({v})" for k, v in found.items())
         others = [e for e in lead.emails_found if e != to and e != (lead.crm_original or {}).get("Email")]
@@ -4998,7 +4998,7 @@ def render_call_page() -> None:
                     + "</div>"
                     f'<div class="pe-hook"><div class="h">Talking points</div><div class="t">{esc(cfg["primary_hook"])}</div>'
                     "<ul>" + "".join(f"<li>{esc(b)}</li>" for b in cfg["pitch_bullets"][:3])
-                    + "<li>Free 7-day trial: no cost, no commitment</li></ul></div>"
+                    + "<li>Free 1-week trial: no cost, no commitment</li></ul></div>"
                 )
                 li_q = f"{(r.get('directors') or [r.get('contact', '')])[0]} {r.get('firm', '')}"
                 lb1, lb2 = st.columns(2)
@@ -5362,7 +5362,7 @@ if st.session_state.get("view") == "activity":
     _ev = build_lr_activity()
     render_activity_page(
         "MY PA <span>activity</span>", "#E11D2E", _ev,
-        [("Free trials offered", ["Emailed"], "MY PA Connect 7-day trial emails"),
+        [("Free trials offered", ["Emailed"], "MY PA Connect free 1-week trial emails"),
          ("Calls logged", ["Call logged"], "Finished calls from the call list")],
         ["Emailed"],
     )
@@ -5610,7 +5610,7 @@ def _qp_save(name: str, values: List[str]) -> None:
 
 with col_left:
     with st.container(key="card-left"):
-        section_header("01", "Zoho leads", "Every lead with an email address. Pick today's batch and offer the free 7-day trial.")
+        section_header("01", "Zoho leads", "Every lead with an email address. Pick today's batch and offer the free 1-week trial.")
         crm_ready = False
         if ZOHO.can_setup:
             render_zoho_setup()
