@@ -4287,6 +4287,38 @@ def get_sent_log() -> Dict[str, Any]:
     return st.session_state["sent_log_data"]
 
 
+# ---- Leads the other app has emailed (Lead Revival), so a lead is only emailed by both when you choose to ----
+OTHER_APP, OTHER_ICON, OTHER_TAG = "Lead Revival", "🟠", None
+OTHER_LOG = SentLog("LR_GITHUB_LOG_PATH", "crm_sent_log.json", ".crm_sent_log.json")
+OTHER_LOG.repo = _secret_value("LR_GITHUB_REPO", OTHER_LOG.repo)  # Same data repo as this app unless set
+OTHER_LOG.token = _secret_value("LR_GITHUB_TOKEN", OTHER_LOG.token)
+OTHER_LOG.backend = "github" if (OTHER_LOG.token and OTHER_LOG.repo) else "local"
+
+
+def other_app_contacted() -> Dict[str, str]:
+    """{lead id: 'd Mon' (or '' if unknown)} for leads Lead Revival has emailed: its own log, plus its Zoho tag."""
+    cached = st.session_state.get("other_app_sent")
+    if not cached or time.time() - cached[0] > 300:
+        out: Dict[str, str] = {}
+        for k, r in (OTHER_LOG.load() or {}).items():
+            if not isinstance(r, dict) or str(r.get("status") or "").startswith("Called"):
+                continue
+            if not (r.get("to") or r.get("via") == "zoho"):
+                continue  # Ticked as handled without an email
+            try:
+                out[str(k)] = datetime.fromisoformat(str(r.get("sent_at"))).strftime("%d %b").lstrip("0")
+            except ValueError:
+                out[str(k)] = ""
+        cached = (time.time(), out, OTHER_LOG.last_error)
+        st.session_state["other_app_sent"] = cached
+    out = dict(cached[1])
+    if OTHER_TAG:
+        for rid, names in (st.session_state.get("lead_tag_map") or {}).items():
+            if any(str(n).strip().lower() == OTHER_TAG.lower() for n in names):
+                out.setdefault(str(rid), "")
+    return out
+
+
 def bump_queue_editor() -> None:
     st.session_state["queue_editor_ver"] = st.session_state.get("queue_editor_ver", 0) + 1
 
@@ -5648,33 +5680,20 @@ def remember_lead_tags(seen: Set[str]) -> None:
         save_tag_setting("known_tags", sorted(stored | seen, key=str.lower))
 
 
-def _all_lead_ids(limit: int = 10000) -> List[str]:
-    """Ids of every lead in Zoho (newest first, up to `limit`), via COQL."""
-    out: List[str] = []
-    offset = 0
-    while offset < limit:
-        body = ZOHO._request("POST", "/crm/v8/coql", json={"select_query":
-                             f"select Last_Name from Leads where id is not null order by Created_Time desc "
-                             f"limit {offset}, 2000"})
-        if not body:
-            break
-        out += [str(r.get("id")) for r in body.get("data") or [] if r.get("id")]
-        if not (body.get("info") or {}).get("more_records"):
-            break
-        offset += 2000
-    return out
-
-
-def _tags_on_every_lead(limit: int = 60000) -> Set[str]:
-    """Every tag name used on any lead, read 200 leads at a time with the Get Records API (no row limit)."""
+def _tags_on_every_lead(limit: int = 60000) -> Tuple[Set[str], int, int]:
+    """Every tag name used on any lead, read 200 leads at a time with the Get Records API.
+    Returns (tag names, leads read, leads carrying at least one tag)."""
     seen: Set[str] = set()
     params: Dict[str, Any] = {"fields": "Last_Name,Tag", "per_page": 200, "page": 1}
-    read = 0
+    read = tagged = 0
     while read < limit:
         body = ZOHO._request("GET", "/crm/v8/Leads", params=params) or {}
         rows = body.get("data") or []
         for r in rows:
-            seen.update(str(t.get("name") if isinstance(t, dict) else t) for t in (r.get("Tag") or []) if t)
+            names = [str(t.get("name") if isinstance(t, dict) else t) for t in (r.get("Tag") or []) if t]
+            names = [n for n in names if n and n != "None"]
+            tagged += bool(names)
+            seen.update(names)
         read += len(rows)
         info = body.get("info") or {}
         if not rows or not info.get("more_records"):
@@ -5683,24 +5702,37 @@ def _tags_on_every_lead(limit: int = 60000) -> Set[str]:
             params = {"fields": "Last_Name,Tag", "per_page": 200, "page_token": info["next_page_token"]}
         else:
             params["page"] = params.get("page", 1) + 1
-    return seen
+    return seen, read, tagged
 
 
-def fetch_lead_tag_list() -> Tuple[int, Optional[str]]:
-    """Fills the tag dropdown. Zoho's own tag list if the key allows it; otherwise reads the tags on the leads
-    themselves (the ones loaded, or every lead if none are loaded yet). Returns (tags available, error)."""
+def fetch_lead_tag_list() -> str:
+    """Fills the tag dropdown and returns a plain-English report of what Zoho sent back.
+    1) Zoho's own tag list for Leads (needs the tags permission). 2) If that fails or comes back empty,
+    reads the tags off every lead instead. Both are combined, so nothing is missed."""
     seen: Set[str] = set()
-    err = None
+    notes: List[str] = []
     try:
         body = ZOHO._request("GET", "/crm/v8/settings/tags", params={"module": "Leads"}) or {}
-        seen.update(str(t.get("name")) for t in body.get("tags") or [] if t.get("name"))
-    except ZohoError:
-        try:  # Key without the tags permission: read the tags off EVERY lead instead (slower, needs nothing new)
-            seen.update(_tags_on_every_lead())
+        listed = {str(t.get("name")) for t in body.get("tags") or [] if isinstance(t, dict) and t.get("name")}
+        seen |= listed
+        notes.append(f"Zoho's tag list for Leads has {len(listed)} tag{'s' if len(listed) != 1 else ''}.")
+    except ZohoError as exc:
+        listed = set()
+        notes.append("Zoho's tag list wasn't available (" + str(exc).replace("Zoho CRM error: ", "") + ").")
+    if not listed:
+        try:
+            found, read, tagged = _tags_on_every_lead()
+            seen |= found
+            notes.append(f"Checked {read:,} leads: {tagged:,} carry a tag, using {len(found)} different "
+                         f"tag{'s' if len(found) != 1 else ''}.")
         except ZohoError as exc:
-            err = str(exc)
+            notes.append("Couldn't read the leads either: " + str(exc).replace("Zoho CRM error: ", "") + ".")
     remember_lead_tags(seen)
-    return len([t for t in known_lead_tags() if not any(w in t.lower() for w in BLOCKED_TAG_WORDS)]), err
+    if seen:
+        shown = sorted(seen, key=str.lower)
+        notes.append("Tags found: " + ", ".join(
+            t + (" (always left out)" if any(w in t.lower() for w in BLOCKED_TAG_WORDS) else "") for t in shown) + ".")
+    return " ".join(notes)
 
 
 def drop_blocked_tags(recs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int, Optional[str]]:
@@ -5713,6 +5745,7 @@ def drop_blocked_tags(recs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]],
         tags = ZOHO.lead_tags(ids)
     except ZohoError as exc:
         return recs, 0, str(exc)
+    st.session_state["lead_tag_map"] = tags
     remember_lead_tags({n for names in tags.values() for n in names})
     picked = {t.strip().lower() for t in excluded_lead_tags()}
     blocked = {rid: [n for n in names if lead_tag_blocked(n, picked)] for rid, names in tags.items()}
@@ -5746,14 +5779,12 @@ def render_excluded_tags_box() -> None:
         if st.button("🔄  Get tags from Zoho" if not all_tags else "🔄  Refresh the tag list", key="lead_tags_fetch",
                      disabled=not ZOHO.configured):
             with st.spinner("Reading tags from Zoho (this can take up to a minute the first time)…"):
-                n_tags, tag_err = fetch_lead_tag_list()
+                tag_report = fetch_lead_tag_list()
             st.session_state["lead_excl_ver"] = st.session_state.get("lead_excl_ver", 0) + 1
-            st.session_state["lead_excl_msg"] = (f"{n_tags} tags available." if n_tags else
-                                                 ("Couldn't read tags from Zoho. " + str(tag_err)) if tag_err else
-                                                 "Zoho didn't return any tags on your leads.")
+            st.session_state["lead_excl_msg"] = tag_report
             st.rerun()
         if st.session_state.get("lead_excl_msg"):
-            st.caption(st.session_state.pop("lead_excl_msg"))
+            st.info(st.session_state.pop("lead_excl_msg"))
         if now:
             st.caption("Now excluding: Not Interested, " + ", ".join(now) + ".")
 
@@ -6044,6 +6075,14 @@ with col_left:
             with f3:
                 order = st.selectbox("Order", ["Newest first", "Oldest first"],
                                      help="Which end of the list today's batch comes from.")
+            g3, _g4 = st.columns(2)
+            with g3:
+                other_mode = st.selectbox(
+                    f"Already emailed by {OTHER_APP}", ["Leave out", "Include", "Only these"], key="f_other_app",
+                    help=f"Leads already emailed by the {OTHER_APP} app (from its log and Zoho). Leave out stops a lead"
+                         f" getting both emails. Pick Only these to come back to them later; {OTHER_APP} sets them to"
+                         " Attempted to Contact, so add that status above and load again.")
+            other_sent = other_app_contacted()
             g1, g2 = st.columns(2)
             with g1:
                 hide_done = st.toggle("Hide already-worked leads", value=True,
@@ -6067,6 +6106,7 @@ with col_left:
                 and (not src or (r.get("Lead_Source") or "—") in src)
                 and (not gaps_only or lead_gaps(r))
                 and (not hide_done or not _done(r))
+                and (other_mode == "Include" or ((r["id"] in other_sent) == (other_mode == "Only these")))
             ]
             recs.sort(key=lambda r: r.get("Created_Time") or "", reverse=(order == "Newest first"))
 
@@ -6081,8 +6121,18 @@ with col_left:
                         return "🔎 " + datetime.fromisoformat(rr["at"]).strftime("%d %b").lstrip("0")
                     except ValueError:
                         return "🔎 Researched"
+                if r["id"] in other_sent:
+                    return f"{OTHER_ICON} {OTHER_APP} " + (other_sent[r["id"]] or "emailed")
                 return "🚫 Opted out" if r.get("Email_Opt_Out") else ""
 
+            n_other_hidden = sum(1 for r in recs_all if r["id"] in other_sent) if other_mode == "Leave out" else 0
+            if n_other_hidden:
+                st.caption(f"{OTHER_ICON} {n_other_hidden:,} loaded {'lead has' if n_other_hidden == 1 else 'leads have'}"
+                           f" already been emailed by {OTHER_APP}, so {'it is' if n_other_hidden == 1 else 'they are'}"
+                           f" left out. Change 'Already emailed by {OTHER_APP}' to see them.")
+            if not recs and other_mode == "Only these":
+                st.caption(f"{OTHER_APP} moves the leads it emails to Attempted to Contact. Add that status at the top"
+                           " and click Load leads to see them here.")
             if not recs:
                 st.caption("No leads match these filters." + (" Everything here has already been worked. Turn off"
                            " 'Hide already-worked leads' to see them." if hide_done else ""))
